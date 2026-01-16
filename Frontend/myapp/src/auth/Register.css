@@ -1,0 +1,95 @@
+.auth-container {
+  border: 1px solid rgba(0,0,0,0.1);
+  padding: 24px;
+  margin: 60px auto;
+  width: 360px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+  text-align: center;
+  animation: fadeIn 0.6s ease-in-out;
+}
+
+.auth-container h2 {
+  margin-bottom: 20px;
+  color: #0f172a;
+}
+
+.auth-container form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auth-container input,
+.auth-container select {
+  width: 100%;
+  padding: 12px;
+  margin: 8px 0;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  outline: none;
+  transition: all 0.3s;
+  box-sizing: border-box;
+}
+
+.auth-container input:focus,
+.auth-container select:focus {
+  border-color: #6c63ff;
+  box-shadow: 0 0 20px rgba(108, 99, 255, 0.2);
+}
+
+.auth-container button {
+  width: 100%;
+  padding: 12px;
+  margin: 16px 0;
+  background: linear-gradient(135deg, #6c63ff, #4cafef);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.3s;
+}
+
+.auth-container button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(108, 99, 255, 0.4);
+}
+
+.auth-container button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.message {
+  margin-top: 15px;
+  font-weight: 500;
+  color: #444;
+}
+
+.auth-link {
+  margin-top: 20px;
+  color: #666;
+}
+
+.auth-link a {
+  color: #6c63ff;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.auth-link a:hover {
+  text-decoration: underline;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

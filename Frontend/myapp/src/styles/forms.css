@@ -1,0 +1,76 @@
+/* Forms */
+.search-box { position: relative; width: 400px; max-width: 100%; }
+.search-input {
+  width: 100%;
+  padding: 12px 45px 12px 15px;
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 14px;
+  transition: all 0.3s ease;
+  background: #f8fafc;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+.search-input:focus {
+  outline: none;
+  border-color: #667eea;
+  background: white;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+  transform: translateY(-1px);
+}
+.search-input::placeholder { color: #a0aec0; font-style: italic; }
+
+.search-icon {
+  position: absolute;
+  right: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #a0aec0;
+  font-size: 16px;
+  transition: color 0.3s ease;
+  pointer-events: none;
+}
+.search-input:focus + .search-icon { color: #667eea; }
+
+.clear-search-btn {
+  position: absolute;
+  right: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #e2e8f0;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  color: #718096;
+  transition: all 0.3s ease;
+}
+.clear-search-btn:hover { background: #cbd5e0; color: #4a5568; transform: translateY(-50%) scale(1.1); }
+
+.filter-controls { display: flex; gap: 15px; align-items: center; }
+.filter-select {
+  padding: 10px 15px;
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 14px;
+  background: #f8fafc;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  min-width: 140px;
+}
+.filter-select:focus { outline: none; border-color: #667eea; background: white; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15); transform: translateY(-1px); }
+.filter-select:hover { border-color: #cbd5e0; background: white; }
+
+.search-results-info { padding: 10px 15px; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; text-align: center; }
+
+/* Responsive adjustments for forms */
+@media (max-width: 768px) {
+  .filter-controls { justify-content: space-between; flex-wrap: wrap; }
+  .filter-select { min-width: 120px; flex: 1; }
+  .search-box { width: 100%; max-width: none; }
+}

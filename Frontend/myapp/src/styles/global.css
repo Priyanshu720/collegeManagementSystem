@@ -1,0 +1,37 @@
+/* Global & Reset */
+:root {
+  --brand-indigo: #4f46e5;
+  --brand-indigo-600: #4338ca;
+  --brand-sky: #38bdf8;
+  --brand-purple: #8b5cf6;
+  --brand-emerald: #10b981;
+  --brand-rose: #f43f5e;
+  --text-primary: #0f172a;
+  --text-muted: #475569;
+  --card-bg: #ffffff;
+}
+
+body { 
+  font-family: 'Arial', sans-serif; 
+  background: linear-gradient(135deg, #f6f8ff, #eef2ff); 
+  margin: 0; 
+  min-height: 100vh; 
+}
+
+/* Animated gradient background overlay */
+.bg-animated::before {
+  content: "";
+  position: fixed;
+  inset: -20% -10% -10% -20%;
+  background: radial-gradient(60% 60% at 20% 10%, rgba(79,70,229,0.12), transparent),
+              radial-gradient(50% 50% at 80% 0%, rgba(56,189,248,0.12), transparent),
+              radial-gradient(40% 40% at 50% 90%, rgba(139,92,246,0.12), transparent);
+  filter: blur(40px);
+  z-index: -1;
+  animation: floatGlow 12s ease-in-out infinite alternate;
+}
+
+@keyframes floatGlow {
+  0% { transform: translateY(0) scale(1); }
+  100% { transform: translateY(20px) scale(1.05); }
+}

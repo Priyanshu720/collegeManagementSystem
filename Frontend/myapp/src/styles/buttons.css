@@ -1,0 +1,93 @@
+/* Buttons */
+.button {
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(135deg, var(--brand-indigo), var(--brand-sky));
+  color: white;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.3s;
+}
+.button:hover {
+  transform: scale(1.05);
+  box-shadow: 0 5px 15px rgba(79, 70, 229, 0.35);
+}
+
+/* Small button */
+.btn-small {
+  padding: 6px 12px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+.btn-small:hover { background: #5a67d8; }
+
+/* Secondary button */
+.btn-secondary {
+  padding: 12px 24px;
+  background: #6b7280;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+.btn-secondary:hover { background: #4b5563; }
+
+/* Mode button */
+.mode-btn {
+  padding: 10px 20px;
+  margin-right: 10px;
+  border: none;
+  border-radius: 8px;
+  background-color: var(--brand-indigo);
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.3s ease; /* Smooth hover & active */
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  animation: fadeIn 0.5s ease forwards;
+}
+.mode-btn:hover {
+  transform: translateY(-3px) scale(1.05);
+  background-color: #6366f1;
+  box-shadow: 0 6px 10px rgba(0,0,0,0.15);
+}
+.mode-btn.active { background-color: #1e40af; transform: scale(1.05); }
+
+/* Sidebar toggle button treated as button */
+.sidebar-toggle {
+  background: #4f46e5;
+  color: white;
+  border: none;
+  padding: 10px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-bottom: 20px;
+  font-size: 18px;
+  transition: all 0.3s;
+}
+.sidebar-toggle:hover { background: #6366f1; transform: scale(1.05); }
+
+/* Button ripple effect */
+.button, .mode-btn, .sidebar-toggle { position: relative; overflow: hidden; }
+.button::after, .mode-btn::after, .sidebar-toggle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  background: rgba(255,255,255,0.35);
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  transition: width 0.4s ease, height 0.4s ease, opacity 0.6s ease;
+  opacity: 0;
+}
+.button:active::after, .mode-btn:active::after, .sidebar-toggle:active::after { width: 220%; height: 220%; opacity: 1; }
