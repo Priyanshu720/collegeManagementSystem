@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
-from typing import Optional
-from ..auth_utils import get_password_hash, verify_password, create_access_token, get_current_user
+from typing import Optional, List
+from ..auth_utils import get_password_hash, verify_password, create_access_token, get_current_user, role_required
 
 
 from fastapi import FastAPI, Depends, HTTPException, status, Request
@@ -11,11 +11,13 @@ from fastapi.responses import JSONResponse
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.future import select
+from sqlalchemy import or_, func
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models, schemas
 from ..database import engine, get_db, Base
-from fastapi import APIRouter
+from fastapi import APIRouter, Body, Query
 
 import logging
 
@@ -28,7 +30,7 @@ logger = logging.getLogger(__name__)
 # ========================
 # FastAPI app setup
 # ========================
-routers = APIRouter()
+router = APIRouter()
 
 # Enable CORS
 # routers.add_middleware(
@@ -42,12 +44,9 @@ routers = APIRouter()
 # ========================
 # Security config
 # ========================
-SECRET_KEY = "your_secret_key"  # ⚠ production me ENV variable use karo
+SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/users/login")
 
 # ========================
 # Global Exception Handler
@@ -75,94 +74,341 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/users/login")
 #     to_encode.update({"exp": expire})
 #     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
-    try:        
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        role: str = payload.get("role")
-        if email is None or role is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token is invalid or expired")
-
-    result = await db.execute(select(models.User).where(models.User.email == email))
-    user = result.scalars().first()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    return user
-
-def role_required(allowed_roles: list[schemas.UserRole]):
-    def wrapper(user: models.User = Depends(get_current_user)):
-        if user.role not in allowed_roles:
-            raise HTTPException(status_code=403, detail="Not enough permissions")
-        return user
-    return wrapper
+# Use shared get_current_user and role_required from auth_utils
 
 # ========================
 # Startup event (create tables)
 # ========================
-@routers.on_event("startup")
-async def startup():
-    async with engine.begin() as conn:
-        # ⚠ Agar tables change karte ho to uncomment karo:
-        # await conn.run_sync(Base.metadata.drop_all)
-        # await conn.run_sync(Base.metadata.create_all)
-        pass
+# No router-level startup hooks; app-level handles DB init
 
 # ========================
 # API endpoints
 # ========================
-@routers.post("/register", response_model=schemas.UserOut)
+@router.post("/register", response_model=schemas.UserOut)
 async def register(user: schemas.UserCreate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(models.User).where(models.User.email == user.email))
-    db_user = result.scalars().first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
+    try:
+        result = await db.execute(select(models.User).where(models.User.email == user.email))
+        db_user = result.scalars().first()
+        if db_user:
+            raise HTTPException(status_code=400, detail="Email already registered")
 
-    hashed_password = get_password_hash(user.password)
-    new_user = models.User(
-        username=user.username,
-        email=user.email,
-        hashed_password=hashed_password,
-        role=models.UserRole(user.role)
-    )
-    db.add(new_user)
-    await db.commit()
-    await db.refresh(new_user)
-    return new_user
+        hashed_password = get_password_hash(user.password)
+        role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
+        if role_value.startswith("UserRole."):
+            role_value = role_value.split(".")[-1]
+        if role_value == "admin":
+            raise HTTPException(status_code=400, detail="Admin cannot be registered via this form")
+        new_user = models.User(
+            username=user.username,
+            email=user.email,
+            hashed_password=hashed_password,
+            role=models.UserRole(role_value)
+        )
+        db.add(new_user)
+        await db.commit()
+        await db.refresh(new_user)
+        return new_user
+    except IntegrityError as ie:
+        await db.rollback()
+        logger.error(f"Integrity error during registration: {ie}")
+        raise HTTPException(status_code=400, detail="User already exists or invalid data")
+    except Exception as exc:
+        await db.rollback()
+        logger.error(f"Registration failed: {exc}")
+        # Return the exception message to help debug locally
+        raise HTTPException(status_code=500, detail=f"Registration failed: {exc}")
 
-@routers.post("/login")
+@router.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(models.User).where(models.User.email == form_data.username))
-    user = result.scalars().first()
+    try:
+        identifier = (form_data.username or "").strip()
+        logger.debug(f"Login attempt for: {identifier}")
+        result = await db.execute(
+            select(models.User).where(
+                or_(
+                    models.User.email == identifier,
+                    models.User.username == identifier
+                )
+            )
+        )
+        user = result.scalars().first()
 
-    if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
+        # Verify password safely; if verification explodes due to invalid hash, treat as invalid credentials
+        try:
+            valid_password = bool(user) and verify_password(form_data.password, user.hashed_password)
+        except Exception as ver_exc:
+            logger.warning(f"Password verification failed for {identifier}: {ver_exc}")
+            valid_password = False
 
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email, "role": user.role.value},
-        expires_delta=access_token_expires
-    )
-    return {
-    "access_token": access_token,
-    "token_type": "bearer",
-    "role": user.role.value,   # ✅ send the role to frontend
-    "username": user.username  # optional: also send username
-}
+        if not user or not valid_password:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
+
+        # Enforce account approval workflow
+        status_value = getattr(user, "status", "active") or "active"
+        if status_value != "active":
+            detail_msg = "Account pending approval" if status_value == "pending" else "Account is not active"
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail_msg)
+
+        # Normalize role for token and response in case user.role is a plain string instead of enum
+        role_value = getattr(user.role, "value", str(user.role))
+
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.email, "role": role_value},
+            expires_delta=access_token_expires
+        )
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "role": role_value,
+            "username": user.username
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Login failed: {exc}")
+        raise HTTPException(status_code=500, detail="Login failed")
 
 
-@routers.get("/me", response_model=schemas.UserOut)
+@router.get("/me", response_model=schemas.UserOut)
 async def read_users_me(current_user: models.User = Depends(get_current_user)):
     return current_user
+
+
+#
 
 # ========================
 # Example role-based routes
 # ========================
-@routers.get("/teacher-dashboard")
+@router.get("/teacher-dashboard")
 async def teacher_dashboard(user=Depends(role_required([schemas.UserRole.teacher, schemas.UserRole.hod, schemas.UserRole.admin]))):
     return {"message": f"Welcome {user.username}, role: {user.role}"}
 
-@routers.get("/admin-panel")
+@router.get("/admin-panel")
 async def admin_panel(user=Depends(role_required([schemas.UserRole.admin]))):
     return {"message": f"Admin access granted for {user.username}"}
+
+
+@router.get("/pending", response_model=List[schemas.UserOut])
+async def list_pending_users(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(role_required([schemas.UserRole.admin]))
+):
+    try:
+        result = await db.execute(
+            select(models.User).where(
+                models.User.status == "pending",
+                models.User.role != models.UserRole.admin,
+            ).order_by(models.User.created_at.desc())
+        )
+        users = result.scalars().all()
+        return users
+    except Exception as exc:
+        logger.error(f"Failed to fetch pending users: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to fetch pending users")
+
+
+@router.patch("/{user_id}/approve", response_model=schemas.UserOut)
+async def approve_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(role_required([schemas.UserRole.admin]))
+):
+    result = await db.execute(select(models.User).where(models.User.id == user_id))
+    target = result.scalars().first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.role == models.UserRole.admin:
+        raise HTTPException(status_code=400, detail="Cannot modify admin via this endpoint")
+
+    target.status = "active"
+    try:
+        await db.commit()
+        await db.refresh(target)
+        return target
+    except Exception as exc:
+        await db.rollback()
+        logger.error(f"Failed to approve user {user_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to approve user")
+
+
+@router.patch("/{user_id}/reject", response_model=schemas.UserOut)
+async def reject_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(role_required([schemas.UserRole.admin]))
+):
+    result = await db.execute(select(models.User).where(models.User.id == user_id))
+    target = result.scalars().first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.role == models.UserRole.admin:
+        raise HTTPException(status_code=400, detail="Cannot modify admin via this endpoint")
+
+    target.status = "rejected"
+    try:
+        await db.commit()
+        await db.refresh(target)
+        return target
+    except Exception as exc:
+        await db.rollback()
+        logger.error(f"Failed to reject user {user_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to reject user")
+
+
+# ========================
+# Admin user management endpoints used by frontend AdminUsers
+# ========================
+@router.get("")
+async def list_users(
+    q: Optional[str] = Query(default=None, description="Search by email or username"),
+    role: Optional[str] = Query(default=None, description="Filter by role"),
+    status: Optional[str] = Query(default=None, description="Filter by status"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(role_required([schemas.UserRole.admin]))
+):
+    try:
+        filters = []
+        if q:
+            q_lower = f"%{q.lower()}%"
+            filters.append(
+                or_(
+                    func.lower(models.User.email).like(q_lower),
+                    func.lower(models.User.username).like(q_lower),
+                )
+            )
+        if role:
+            try:
+                role_enum = models.UserRole(role)
+                filters.append(models.User.role == role_enum)
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid role filter")
+        if status:
+            if status not in {"active", "pending", "rejected"}:
+                raise HTTPException(status_code=400, detail="Invalid status filter")
+            filters.append(models.User.status == status)
+
+        # Total count
+        count_stmt = select(func.count(models.User.id))
+        if filters:
+            count_stmt = count_stmt.where(*filters)
+        total = (await db.execute(count_stmt)).scalar() or 0
+
+        # Page items
+        stmt = select(models.User)
+        if filters:
+            stmt = stmt.where(*filters)
+        stmt = stmt.order_by(models.User.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+        result = await db.execute(stmt)
+        users_list = result.scalars().all()
+
+        def serialize(u: models.User):
+            return {
+                "id": u.id,
+                "username": u.username,
+                "email": u.email,
+                "role": getattr(u.role, "value", str(u.role)),
+                "status": u.status,
+                "created_at": u.created_at.isoformat() if getattr(u, "created_at", None) else None,
+            }
+
+        return {
+            "items": [serialize(u) for u in users_list],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to list users: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to fetch users")
+
+
+@router.get("/roles/list")
+async def list_roles(user=Depends(role_required([schemas.UserRole.admin]))):
+    try:
+        return {"roles": [r.value for r in schemas.UserRole]}
+    except Exception as exc:
+        logger.error(f"Failed to list roles: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to fetch roles")
+
+
+@router.patch("/{user_id}")
+async def update_user(
+    user_id: int,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(role_required([schemas.UserRole.admin]))
+):
+    try:
+        result = await db.execute(select(models.User).where(models.User.id == user_id))
+        target = result.scalars().first()
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Restrict critical changes to admin user
+        if target.role == models.UserRole.admin and any(k in payload for k in ["role", "status"]):
+            raise HTTPException(status_code=400, detail="Cannot modify admin role or status")
+
+        if "username" in payload and payload["username"]:
+            target.username = str(payload["username"]).strip()
+        if "email" in payload and payload["email"]:
+            target.email = str(payload["email"]).strip()
+        if "role" in payload and payload["role"]:
+            role_value = payload["role"]
+            if isinstance(role_value, str) and role_value.startswith("UserRole."):
+                role_value = role_value.split(".")[-1]
+            try:
+                target.role = models.UserRole(str(role_value))
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid role value")
+        if "status" in payload and payload["status"]:
+            status_val = str(payload["status"]).lower()
+            if status_val not in {"active", "pending", "rejected"}:
+                raise HTTPException(status_code=400, detail="Invalid status value")
+            target.status = status_val
+
+        await db.commit()
+        await db.refresh(target)
+        return {
+            "id": target.id,
+            "username": target.username,
+            "email": target.email,
+            "role": getattr(target.role, "value", str(target.role)),
+            "status": target.status,
+            "created_at": target.created_at.isoformat() if getattr(target, "created_at", None) else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        logger.error(f"Failed to update user {user_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Update failed")
+
+
+@router.delete("/{user_id}")
+async def delete_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(role_required([schemas.UserRole.admin]))
+):
+    try:
+        result = await db.execute(select(models.User).where(models.User.id == user_id))
+        target = result.scalars().first()
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found")
+        if target.role == models.UserRole.admin:
+            raise HTTPException(status_code=400, detail="Cannot delete admin user")
+
+        await db.delete(target)
+        await db.commit()
+        return {"detail": "User deleted"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        logger.error(f"Failed to delete user {user_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Delete failed")

@@ -10,7 +10,7 @@ from fastapi.security import OAuth2PasswordBearer
 from . import models, schemas
 from .database import get_db
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/users/login")
 
 SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
@@ -46,9 +46,26 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
-def role_required(allowed_roles: list[schemas.UserRole]):
+def _normalize_role(role_item):
+    """Return a comparable string value for a role which may be an enum or string."""
+    try:
+        # Enum instances (from models or schemas) expose .value
+        return getattr(role_item, "value", str(role_item))
+    except Exception:
+        return str(role_item)
+
+
+def role_required(allowed_roles):
+    """Dependency factory enforcing that current user has one of the allowed roles.
+
+    allowed_roles can be a list of models.UserRole, schemas.UserRole, or strings.
+    """
+    normalized_allowed = {_normalize_role(r) for r in allowed_roles}
+
     def wrapper(user: models.User = Depends(get_current_user)):
-        if user.role not in allowed_roles:
+        user_role_value = _normalize_role(user.role)
+        if user_role_value not in normalized_allowed:
             raise HTTPException(status_code=403, detail="Not enough permissions")
         return user
+
     return wrapper
